@@ -8,3 +8,6 @@ Use AWS Rekognition on images locally
 3. Add the images you want to analyze into the `local_images` directory
 4. Run the `tob64json.sh`, which creates a json submission with the image in base64
 5. Run the `submit_rekognition.sh` script
+6. Using Python, run `generate_manifest.py` to generate the manifest for the viewer
+7. Using Python, run `python3 -m http.server`
+8. Go to `http://localhost:8000/viewer.html` in the browser to display the results
