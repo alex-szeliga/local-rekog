@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Image & AI Data Viewer</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; margin: 0; height: 100vh; background-color: #f4f4f4; }
+        #sidebar { width: 280px; background-color: #fff; border-right: 1px solid #ddd; padding: 15px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
+        #sidebar h2 { margin-top: 0; font-size: 1.2em; color: #333; }
+        #sidebar ul { list-style-type: none; padding: 0; margin: 0; }
+        #sidebar li { padding: 10px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 5px; transition: background-color 0.2s; word-break: break-word; }
+        #sidebar li:hover { background-color: #e9e9e9; }
+        #sidebar li.active { background-color: #007bff; color: white; font-weight: bold; }
+        
+        #content-area { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; align-items: center;}
+        #viewer-container { width: 95%; max-width: 1400px; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        #current-file-title { text-align: center; font-size: 1.5em; color: #333; margin-bottom: 10px; }
+
+        #view-mode-selector { text-align: center; margin-bottom: 15px; }
+        #view-mode-selector button {
+            padding: 8px 15px; margin: 0 5px; border: 1px solid #ccc; background-color: #f0f0f0;
+            color: #333; border-radius: 4px; cursor: pointer; font-size: 0.9em;
+        }
+        #view-mode-selector button:hover { background-color: #e0e0e0; }
+        #view-mode-selector button.active-mode { background-color: #007bff; color: white; border-color: #007bff; font-weight: bold;}
+
+        #image-overlay-container { position: relative; display: inline-block; margin: 0 auto 20px auto; border: 1px solid #ddd; line-height: 0; }
+        #image-display { display: block; max-width: 100%; max-height: 60vh; border-radius: 4px; object-fit: contain; }
+        #svg-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+
+        #json-title { font-size: 1.2em; color: #333; margin-top: 10px; margin-bottom: 10px; }
+        #json-display { white-space: pre-wrap; word-wrap: break-word; background-color: #282c34; color: #abb2bf; border: 1px solid #ddd; padding: 15px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.9em; max-height: 250px; overflow-y: auto;}
+        .hidden { display: none !important; }
+        .error-message { color: red; text-align: center; }
+    </style>
+</head>
+<body>
+    <nav id="sidebar">
+        <h2>Files</h2>
+        <ul id="navigation-ul"></ul>
+    </nav>
+    <main id="content-area">
+        <div id="viewer-container">
+            <h1 id="current-file-title">Select a file from the list</h1>
+            <div id="view-mode-selector">
+                <button id="rekognition-mode-btn" class="active-mode">Rekognition View</button>
+                <button id="textract-mode-btn">Textract View</button>
+            </div>
+            <div id="image-overlay-container">
+                <img id="image-display" src="#" alt="Selected Image" class="hidden">
+                <svg id="svg-overlay"></svg>
+            </div>
+            <h2 id="json-title" class="hidden">JSON Content:</h2>
+            <pre id="json-display" class="hidden">{}</pre>
+        </div>
+    </main>
+
+    <script>
+        const navUl = document.getElementById('navigation-ul');
+        const imageDisplay = document.getElementById('image-display');
+        const svgOverlay = document.getElementById('svg-overlay');
+        const jsonDisplay = document.getElementById('json-display');
+        const jsonTitle = document.getElementById('json-title');
+        const currentFileTitle = document.getElementById('current-file-title');
+        
+        const rekognitionModeBtn = document.getElementById('rekognition-mode-btn');
+        const textractModeBtn = document.getElementById('textract-mode-btn');
+
+        let currentFilesManifest = [];
+        let currentViewMode = 'rekognition'; // Default view mode
+        let currentLoadedFilePair = null;    // Stores the manifest data for the currently selected image
+        let currentImageRenderedWidth = 0;
+        let currentImageRenderedHeight = 0;
+
+
+        async function loadManifestAndDisplayFiles() {
+            try {
+                const response = await fetch('file_manifest.json?cachebust=' + new Date().getTime());
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status} fetching manifest.`);
+                currentFilesManifest = await response.json();
+                populateFileList(currentFilesManifest);
+            } catch (error) {
+                console.error("Could not load file manifest:", error);
+                navUl.innerHTML = `<li class="error-message">Error loading file list. <br>1. Run manifest generator. <br>2. Use a local web server. <br><small>${error.message}</small></li>`;
+            }
+        }
+
+        function populateFileList(files) {
+            navUl.innerHTML = '';
+            if (!files || files.length === 0) {
+                navUl.innerHTML = '<li>No image/JSON pairs found. Run manifest generator.</li>';
+                return;
+            }
+            files.forEach((filePair) => {
+                const listItem = document.createElement('li');
+                listItem.textContent = filePair.name;
+                let titleText = `Image: ${filePair.imagePath}`;
+                if(filePair.rekognitionJsonPath) titleText += `\nRekognition: ${filePair.rekognitionJsonPath}`;
+                if(filePair.textractJsonPath) titleText += `\nTextract: ${filePair.textractJsonPath}`;
+                listItem.title = titleText;
+                listItem.onclick = (event) => loadNewImage(filePair, event.currentTarget);
+                navUl.appendChild(listItem);
+            });
+        }
+
+        function clearPreviousContent() {
+            svgOverlay.innerHTML = '';
+            imageDisplay.classList.add('hidden');
+            imageDisplay.removeAttribute('src');
+            jsonDisplay.classList.add('hidden');
+            jsonTitle.classList.add('hidden');
+            currentFileTitle.textContent = 'Loading...';
+        }
+        
+        function loadNewImage(filePair, listItemElement) {
+            clearPreviousContent();
+            currentLoadedFilePair = filePair; // Store for view mode switching
+
+            document.querySelectorAll('#navigation-ul li').forEach(li => li.classList.remove('active'));
+            if(listItemElement) listItemElement.classList.add('active');
+            
+            updatePageTitle(); // Update title based on current mode
+
+            imageDisplay.onload = () => {
+                imageDisplay.classList.remove('hidden');
+                updatePageTitle(); // Update again once loaded
+
+                currentImageRenderedWidth = imageDisplay.offsetWidth;
+                currentImageRenderedHeight = imageDisplay.offsetHeight;
+                svgOverlay.setAttribute('viewBox', `0 0 ${currentImageRenderedWidth} ${currentImageRenderedHeight}`);
+                svgOverlay.style.width = currentImageRenderedWidth + 'px';
+                svgOverlay.style.height = currentImageRenderedHeight + 'px';
+                
+                fetchAndDrawDataForCurrentMode(); // Fetch data based on currentViewMode
+            };
+            imageDisplay.onerror = () => {
+                console.error("Error loading image:", filePair.imagePath);
+                currentFileTitle.textContent = `Error loading: ${filePair.name}`;
+            };
+            imageDisplay.src = filePair.imagePath + '?cachebust=' + new Date().getTime();
+            imageDisplay.alt = `Image: ${filePair.name}`;
+        }
+
+        function updatePageTitle() {
+            if (currentLoadedFilePair) {
+                let modeText = currentViewMode.charAt(0).toUpperCase() + currentViewMode.slice(1);
+                currentFileTitle.textContent = `${currentLoadedFilePair.name} (${modeText} View)`;
+            } else {
+                currentFileTitle.textContent = 'Select a file from the list';
+            }
+        }
+
+        async function fetchAndDrawDataForCurrentMode() {
+            if (!currentLoadedFilePair || currentImageRenderedWidth === 0) return; // No file selected or image not rendered
+
+            svgOverlay.innerHTML = ''; // Clear previous overlays
+            jsonDisplay.classList.add('hidden');
+            jsonTitle.classList.add('hidden');
+
+            let jsonPathToFetch = null;
+            let visualizationFunction = null;
+            let modeFriendlyName = "";
+
+            if (currentViewMode === 'rekognition') {
+                jsonPathToFetch = currentLoadedFilePair.rekognitionJsonPath;
+                visualizationFunction = drawRekognitionVisualizations;
+                modeFriendlyName = "Rekognition";
+            } else if (currentViewMode === 'textract') {
+                jsonPathToFetch = currentLoadedFilePair.textractJsonPath;
+                visualizationFunction = drawTextractVisualizations; // We'll define this
+                modeFriendlyName = "Textract";
+            }
+
+            jsonTitle.textContent = `${modeFriendlyName} JSON:`;
+
+            if (jsonPathToFetch) {
+                try {
+                    const response = await fetch(jsonPathToFetch + '?cachebust=' + new Date().getTime());
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const jsonData = await response.json();
+                    
+                    jsonDisplay.textContent = JSON.stringify(jsonData, null, 2);
+                    jsonDisplay.classList.remove('hidden');
+                    jsonTitle.classList.remove('hidden');
+
+                    if (visualizationFunction) {
+                        visualizationFunction(jsonData, currentImageRenderedWidth, currentImageRenderedHeight);
+                    }
+                } catch (error) {
+                    console.error(`Could not load ${modeFriendlyName} JSON from "${jsonPathToFetch}":`, error);
+                    jsonDisplay.textContent = `Error loading ${modeFriendlyName} JSON for ${currentLoadedFilePair.name}:\n${error.message}`;
+                    jsonDisplay.classList.remove('hidden');
+                    jsonTitle.classList.remove('hidden');
+                }
+            } else {
+                jsonDisplay.textContent = `No ${modeFriendlyName} JSON file associated with this image for '${currentLoadedFilePair.name}'.`;
+                jsonDisplay.classList.remove('hidden');
+                jsonTitle.classList.remove('hidden');
+            }
+        }
+        
+        function switchViewMode(newMode) {
+            if (currentViewMode === newMode) return;
+            currentViewMode = newMode;
+
+            rekognitionModeBtn.classList.toggle('active-mode', newMode === 'rekognition');
+            textractModeBtn.classList.toggle('active-mode', newMode === 'textract');
+            
+            updatePageTitle();
+            if (currentLoadedFilePair) { // If an image is already loaded, refresh its data display
+                fetchAndDrawDataForCurrentMode();
+            }
+        }
+
+        rekognitionModeBtn.onclick = () => switchViewMode('rekognition');
+        textractModeBtn.onclick = () => switchViewMode('textract');
+
+        // --- Visualization Functions ---
+        function drawRekognitionVisualizations(data, imgWidth, imgHeight) {
+            // (Keep your existing drawRekognitionVisualizations function here)
+            // Ensure it uses svgOverlay, imgWidth, imgHeight passed as arguments
+            // Example (shortened, use your full version):
+            if (data.Labels) {
+                data.Labels.forEach(label => {
+                    if (label.Instances) {
+                        label.Instances.forEach(instance => {
+                            if (instance.BoundingBox) {
+                                drawBoundingBox(svgOverlay, instance.BoundingBox, label.Name, instance.Confidence, 'rgba(0, 150, 255, 0.8)', imgWidth, imgHeight);
+                            }
+                        });
+                    }
+                });
+            }
+            // Add FaceDetails, TextDetections (Rekognition's version), ModerationLabels parsers here...
+            if (data.FaceDetails) {
+                data.FaceDetails.forEach(face => {
+                    if (face.BoundingBox) {
+                        drawBoundingBox(svgOverlay, face.BoundingBox, "Face", face.Confidence, 'rgba(255, 0, 0, 0.8)', imgWidth, imgHeight);
+                        if (face.Landmarks) face.Landmarks.forEach(lm => drawCircle(svgOverlay, lm.X, lm.Y, 'red', imgWidth, imgHeight));
+                    }
+                });
+            }
+            if (data.TextDetections) { // Rekognition's TextDetections
+                data.TextDetections.forEach(text => {
+                    if (text.Geometry && text.Geometry.Polygon && (text.Type === "LINE" || text.Type === "WORD")) {
+                         drawPolygon(svgOverlay, text.Geometry.Polygon, text.DetectedText, text.Confidence, text.Type === "LINE" ? 'rgba(0,200,0,0.7)' : 'rgba(50,200,50,0.5)', imgWidth, imgHeight);
+                    }
+                });
+            }
+        }
+
+        function drawTextractVisualizations(data, imgWidth, imgHeight) {
+            svgOverlay.innerHTML = ''; // Clear specifically for Textract drawing
+            if (!data.Blocks) {
+                console.warn("Textract data does not contain 'Blocks'.");
+                return;
+            }
+            data.Blocks.forEach(block => {
+                let labelText = block.Text || block.BlockType; // Default to BlockType if no text
+                let color = 'rgba(128, 0, 128, 0.7)'; // Default purple for Textract
+
+                if (block.BlockType === "LINE") {
+                    color = 'rgba(255, 140, 0, 0.8)'; // Dark Orange for lines
+                    if (block.Geometry && block.Geometry.Polygon) {
+                        drawPolygon(svgOverlay, block.Geometry.Polygon, block.Text, block.Confidence, color, imgWidth, imgHeight);
+                    } else if (block.Geometry && block.Geometry.BoundingBox) {
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, block.Text, block.Confidence, color, imgWidth, imgHeight);
+                    }
+                } else if (block.BlockType === "WORD") {
+                    color = 'rgba(255, 165, 0, 0.6)'; // Lighter Orange for words
+                     if (block.Geometry && block.Geometry.Polygon) { // Prefer polygon for words
+                        drawPolygon(svgOverlay, block.Geometry.Polygon, block.Text, block.Confidence, color, imgWidth, imgHeight, false); // Don't draw label for every word to avoid clutter
+                    }
+                } else if (block.BlockType === "TABLE") {
+                    color = 'rgba(0, 0, 200, 0.6)'; // Blue for tables
+                    if (block.Geometry && block.Geometry.BoundingBox) {
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, "TABLE", block.Confidence, color, imgWidth, imgHeight);
+                    }
+                } else if (block.BlockType === "CELL") {
+                    color = 'rgba(100, 100, 200, 0.5)'; // Lighter blue for cells
+                     if (block.Geometry && block.Geometry.BoundingBox) {
+                        // Drawing all cells can be very cluttered. Consider drawing only if a "show cells" toggle is on.
+                        // For now, let's skip drawing individual cell text to avoid extreme clutter.
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, "" , block.Confidence, color, imgWidth, imgHeight, false);
+                    }
+                } else if (block.BlockType === "KEY_VALUE_SET") {
+                    if (block.EntityTypes && block.EntityTypes.includes("KEY") && block.Geometry && block.Geometry.BoundingBox) {
+                        color = 'rgba(0, 128, 0, 0.7)'; // Green for Keys
+                        // Find associated value to display if desired, complex due to relationships
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, "KEY", block.Confidence, color, imgWidth, imgHeight);
+                    } else if (block.EntityTypes && block.EntityTypes.includes("VALUE") && block.Geometry && block.Geometry.BoundingBox) {
+                        color = 'rgba(144, 238, 144, 0.7)'; // Light Green for Values
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, "VALUE", block.Confidence, color, imgWidth, imgHeight);
+                    }
+                } else if (block.BlockType === "SELECTION_ELEMENT") {
+                    color = 'rgba(255, 20, 147, 0.8)'; // Deep pink for selection elements
+                    let selStatus = block.SelectionStatus === "SELECTED" ? "☑" : "☐";
+                    if (block.Geometry && block.Geometry.BoundingBox) {
+                        drawBoundingBox(svgOverlay, block.Geometry.BoundingBox, selStatus, block.Confidence, color, imgWidth, imgHeight);
+                    }
+                }
+            });
+        }
+
+        // --- SVG Drawing Helper Functions (use your existing ones, ensure they take svg element as first param) ---
+        function drawBoundingBox(svg, bbox, label, confidence, color, imgWidth, imgHeight, showLabel = true) {
+            if (!bbox || !imgWidth || !imgHeight) return;
+            const x = bbox.Left * imgWidth;
+            const y = bbox.Top * imgHeight;
+            const w = bbox.Width * imgWidth;
+            const h = bbox.Height * imgHeight;
+
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x); rect.setAttribute('y', y);
+            rect.setAttribute('width', w); rect.setAttribute('height', h);
+            rect.setAttribute('stroke', color); rect.setAttribute('stroke-width', '2');
+            rect.setAttribute('fill', 'none');
+            svg.appendChild(rect);
+
+            if (showLabel && label) {
+                const textLabel = `${label} (${parseFloat(confidence).toFixed(1)}%)`;
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', x + 3);
+                text.setAttribute('y', y > 15 ? y - 5 : y + Math.min(15, h - 2) ); // Adjust Y to be inside or above
+                text.setAttribute('fill', 'white'); text.setAttribute('font-size', '12px');
+                text.setAttribute('font-family', 'sans-serif'); text.setAttribute('paint-order', 'stroke');
+                text.setAttribute('stroke', 'black'); text.setAttribute('stroke-width', '0.5px');
+                text.textContent = textLabel;
+                svg.appendChild(text);
+            }
+        }
+        
+        function drawPolygon(svg, polygonPoints, label, confidence, color, imgWidth, imgHeight, showLabel = true) {
+            if (!polygonPoints || !imgWidth || !imgHeight) return;
+            const points = polygonPoints.map(p => `${p.X * imgWidth},${p.Y * imgHeight}`).join(' ');
+
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            polygon.setAttribute('points', points); polygon.setAttribute('stroke', color);
+            polygon.setAttribute('stroke-width', '2'); polygon.setAttribute('fill', 'rgba(255,255,255,0.1)');
+            svg.appendChild(polygon);
+
+            if (showLabel && label) {
+                const textLabel = `${label} (${parseFloat(confidence).toFixed(1)}%)`;
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', polygonPoints[0].X * imgWidth);
+                text.setAttribute('y', polygonPoints[0].Y * imgHeight - 5);
+                text.setAttribute('fill', 'white'); text.setAttribute('font-size', '12px');
+                text.setAttribute('font-family', 'sans-serif'); text.setAttribute('paint-order', 'stroke');
+                text.setAttribute('stroke', 'black'); text.setAttribute('stroke-width', '0.5px');
+                text.textContent = textLabel;
+                svg.appendChild(text);
+            }
+        }
+
+        function drawCircle(svg, relX, relY, color, imgWidth, imgHeight, radius = 3) {
+            if (relX === undefined || relY === undefined || !imgWidth || !imgHeight) return;
+            const cx = relX * imgWidth; const cy = relY * imgHeight;
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', cx); circle.setAttribute('cy', cy);
+            circle.setAttribute('r', radius); circle.setAttribute('fill', color);
+            svg.appendChild(circle);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadManifestAndDisplayFiles();
+            // Set initial active button state
+            rekognitionModeBtn.classList.add('active-mode');
+            textractModeBtn.classList.remove('active-mode');
+        });
+    </script>
+</body>
+</html>

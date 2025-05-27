@@ -2,7 +2,8 @@ import os
 import json
 
 IMAGE_DIR_NAME = "local_images"
-JSON_DIR_NAME = "rekognition_response_json"
+REKOGNITION_JSON_DIR_NAME = "rekognition_response_json"
+TEXTRACT_JSON_DIR_NAME = "textract_response_json"
 MANIFEST_FILENAME = "file_manifest.json"
 
 def create_manifest():
@@ -10,16 +11,15 @@ def create_manifest():
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     image_dir_path = os.path.join(base_dir, IMAGE_DIR_NAME)
-    json_dir_path = os.path.join(base_dir, JSON_DIR_NAME)
+    rekognition_json_dir_path = os.path.join(base_dir, REKOGNITION_JSON_DIR_NAME)
+    textract_json_dir_path = os.path.join(base_dir, TEXTRACT_JSON_DIR_NAME)
     
     print(f"Scanning for images in: {image_dir_path}")
-    print(f"Scanning for JSON in: {json_dir_path}")
+    print(f"Scanning for Rekognition JSON in: {rekognition_json_dir_path}")
+    print(f"Scanning for Textract JSON in: {textract_json_dir_path}")
 
     if not os.path.isdir(image_dir_path):
         print(f"Error: Image directory '{image_dir_path}' not found.")
-        return
-    if not os.path.isdir(json_dir_path):
-        print(f"Error: JSON directory '{json_dir_path}' not found.")
         return
     
     image_files = {}
@@ -28,22 +28,30 @@ def create_manifest():
             base_name = os.path.splitext(f)[0]
             image_files[base_name] = os.path.join(IMAGE_DIR_NAME, f).replace(os.sep, '/')
     
-    json_files_map = {}
-    for f in os.listdir(json_dir_path):
+    rekognition_json_files_map = {}
+    for f in os.listdir(rekognition_json_dir_path):
         if f.lower().endswith('.json'):
             base_name = os.path.splitext(f)[0]
-            json_files_map[base_name] = os.path.join(JSON_DIR_NAME, f).replace(os.sep, '/')
+            rekognition_json_files_map[base_name] = os.path.join(REKOGNITION_JSON_DIR_NAME, f).replace(os.sep, '/')
+    
+    textract_json_files_map = {}
+    for f in os.listdir(textract_json_dir_path):
+        if f.lower().endswith('.json'):
+            base_name = os.path.splitext(f)[0]
+            textract_json_files_map[base_name] = os.path.join(TEXTRACT_JSON_DIR_NAME, f).replace(os.sep, '/')
 
     if not image_files:
         print(f"No image files found in '{IMAGE_DIR_NAME}'")
     
     for base_name, img_path, in image_files.items():
-        json_path = json_files_map.get(base_name)
-        if json_path:
+        rekognition_json_path = rekognition_json_files_map.get(base_name)
+        textract_json_path = textract_json_files_map.get(base_name)
+        if rekognition_json_path or textract_json_path:
             manifest_data.append({
                 "name": base_name,
                 "imagePath": img_path,
-                "jsonPath": json_path
+                "rekognitionJsonPath": rekognition_json_path,
+                "textractJsonPath": textract_json_path
             })
         else:
             print(f"Warning, no matching JSON file found for '{img_path}'")

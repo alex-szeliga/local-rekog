@@ -93,7 +93,7 @@
             files.forEach((filePair) => {
                 const listItem = document.createElement('li');
                 listItem.textContent = filePair.name;
-                listItem.title = `Image: ${filePair.imagePath}\nJSON: ${filePair.jsonPath || 'N/A'}`;
+                listItem.title = `Image: ${filePair.imagePath}\nJSON: ${filePair.rekognitionJsonPath || 'N/A'}`;
                 listItem.onclick = (event) => loadContent(filePair, event.currentTarget);
                 navUl.appendChild(listItem);
             });
@@ -139,9 +139,9 @@
         }
 
         async function fetchAndDrawRekognitionData(filePair, imgRenderedWidth, imgRenderedHeight) {
-            if (filePair.jsonPath) {
+            if (filePair.rekognitionJsonPath) {
                 try {
-                    const response = await fetch(filePair.jsonPath + '?cachebust=' + new Date().getTime());
+                    const response = await fetch(filePair.rekognitionJsonPath + '?cachebust=' + new Date().getTime());
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                     const jsonData = await response.json();
                     
@@ -151,7 +151,7 @@
 
                     drawRekognitionVisualizations(jsonData, imgRenderedWidth, imgRenderedHeight);
                 } catch (error) {
-                    console.error(`Could not load JSON file "${filePair.jsonPath}":`, error);
+                    console.error(`Could not load JSON file "${filePair.rekognitionJsonPath}":`, error);
                     jsonDisplay.textContent = `Error loading JSON for ${filePair.name}:\n${error.message}`;
                     jsonDisplay.classList.remove('hidden');
                     jsonTitle.classList.remove('hidden');
