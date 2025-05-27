@@ -1,11 +1,9 @@
 #!/bin/bash
 
-IMAGE_INPUT_DIR="./local_images" # !!! IMPORTANT: Change this to your image directory !!!
-OUTPUT_JSON_DIR="./rekognition_json_payloads" # !!! This will create a subdirectory !!!
+IMAGE_INPUT_DIR="./local_images"
+OUTPUT_JSON_DIR="./rekognition_json_payloads"
 
 BASE64_CMD="base64 -i"
-
-# --- Script Logic ---
 
 # Check if the input image directory exists
 if [ ! -d "$IMAGE_INPUT_DIR" ]; then
