@@ -4,7 +4,7 @@ Use AWS Rekognition on images locally
 ## How to use:
 
 1. use the `aws configure sso` command and make sure your environment has the Rekognition features enabled
-  - The response will include your SSO profile name
+    a. The response will include your SSO profile name
 2. Create an `.env` file from the example and add your AWS SSO profile name and preferred region
 3. Add the images you want to analyze into the `local_images` directory
 4. Run the `tob64json.sh`, which creates a json submission with the image in base64
