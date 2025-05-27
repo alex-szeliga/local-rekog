@@ -1,3 +1,4 @@
+file_manifest.json
 .env
 local_images/*
 !local_images/.gitkeep
