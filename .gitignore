@@ -2,5 +2,5 @@ file_manifest.json
 .env
 local_images/*
 !local_images/.gitkeep
-rekognition_json_payloads/*
-rekognition_response_json/*
+*_json_payloads/*
+*_response_json/*
