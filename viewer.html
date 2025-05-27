@@ -3,21 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Image & JSON Viewer</title>
+    <title>Local Image & Rekognition Viewer</title>
     <style>
         body { font-family: Arial, sans-serif; display: flex; margin: 0; height: 100vh; background-color: #f4f4f4; }
         #sidebar { width: 280px; background-color: #fff; border-right: 1px solid #ddd; padding: 15px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
         #sidebar h2 { margin-top: 0; font-size: 1.2em; color: #333; }
         #sidebar ul { list-style-type: none; padding: 0; margin: 0; }
-        #sidebar li { padding: 10px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 5px; transition: background-color 0.2s; }
+        #sidebar li { padding: 10px 12px; cursor: pointer; border-radius: 4px; margin-bottom: 5px; transition: background-color 0.2s; word-break: break-word; }
         #sidebar li:hover { background-color: #e9e9e9; }
         #sidebar li.active { background-color: #007bff; color: white; font-weight: bold; }
         #content-area { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; align-items: center;}
         #viewer-container { width: 90%; max-width: 1200px; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         #current-file-title { text-align: center; font-size: 1.5em; color: #333; margin-bottom: 20px; }
-        #image-display { display: block; max-width: 100%; max-height: 60vh; margin: 0 auto 20px auto; border: 1px solid #ddd; border-radius: 4px; object-fit: contain; }
+        
+        /* Container for image and SVG overlay */
+        #image-overlay-container {
+            position: relative; /* Crucial for positioning the SVG overlay */
+            display: inline-block; /* So it only takes up the image's width */
+            margin: 0 auto 20px auto;
+            border: 1px solid #ddd;
+            line-height: 0; /* Removes extra space below image if any */
+        }
+        #image-display {
+            display: block;
+            max-width: 100%;
+            max-height: 60vh; /* Adjust as needed */
+            border-radius: 4px;
+            object-fit: contain;
+        }
+        #svg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%; /* Will be adjusted by JS to match image's rendered size */
+            height: 100%;/* Will be adjusted by JS to match image's rendered size */
+            pointer-events: none; /* So you can still interact with image if needed (not relevant here) */
+        }
+
         #json-title { font-size: 1.2em; color: #333; margin-top: 20px; margin-bottom: 10px; }
-        #json-display { white-space: pre-wrap; word-wrap: break-word; background-color: #282c34; color: #abb2bf; border: 1px solid #ddd; padding: 15px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.9em; overflow-y: auto;}
+        #json-display { white-space: pre-wrap; word-wrap: break-word; background-color: #282c34; color: #abb2bf; border: 1px solid #ddd; padding: 15px; border-radius: 4px; font-family: 'Courier New', Courier, monospace; font-size: 0.9em;}
         .hidden { display: none !important; }
         .error-message { color: red; text-align: center; }
     </style>
@@ -25,13 +49,15 @@
 <body>
     <nav id="sidebar">
         <h2>Files</h2>
-        <ul id="navigation-ul">
-            </ul>
+        <ul id="navigation-ul"></ul>
     </nav>
     <main id="content-area">
         <div id="viewer-container">
             <h1 id="current-file-title">Select a file from the list</h1>
-            <img id="image-display" src="#" alt="Selected Image" class="hidden">
+            <div id="image-overlay-container">
+                <img id="image-display" src="#" alt="Selected Image" class="hidden">
+                <svg id="svg-overlay"></svg>
+            </div>
             <h2 id="json-title" class="hidden">JSON Content:</h2>
             <pre id="json-display" class="hidden">{}</pre>
         </div>
@@ -40,6 +66,7 @@
     <script>
         const navUl = document.getElementById('navigation-ul');
         const imageDisplay = document.getElementById('image-display');
+        const svgOverlay = document.getElementById('svg-overlay'); // Our SVG layer
         const jsonDisplay = document.getElementById('json-display');
         const jsonTitle = document.getElementById('json-title');
         const currentFileTitle = document.getElementById('current-file-title');
@@ -47,22 +74,20 @@
 
         async function loadManifestAndDisplayFiles() {
             try {
-                const response = await fetch('file_manifest.json?cachebust=' + new Date().getTime()); // Cache busting
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status} while fetching manifest.`);
-                }
+                const response = await fetch('file_manifest.json?cachebust=' + new Date().getTime());
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status} fetching manifest.`);
                 currentFilesManifest = await response.json();
                 populateFileList(currentFilesManifest);
             } catch (error) {
                 console.error("Could not load file manifest:", error);
-                navUl.innerHTML = `<li class="error-message">Error loading file list. <br>1. Run generate_manifest.py. <br>2. Ensure you're using a local web server. <br><small>${error.message}</small></li>`;
+                navUl.innerHTML = `<li class="error-message">Error loading file list. <br>1. Run manifest generator. <br>2. Use a local web server. <br><small>${error.message}</small></li>`;
             }
         }
 
         function populateFileList(files) {
-            navUl.innerHTML = ''; // Clear existing list
+            navUl.innerHTML = '';
             if (!files || files.length === 0) {
-                navUl.innerHTML = '<li>No image/JSON pairs found in manifest. Run generate_manifest.py.</li>';
+                navUl.innerHTML = '<li>No image/JSON pairs found. Run manifest generator.</li>';
                 return;
             }
             files.forEach((filePair) => {
@@ -74,29 +99,57 @@
             });
         }
 
+        function clearPreviousContent() {
+            svgOverlay.innerHTML = ''; // Clear previous SVG drawings
+            imageDisplay.classList.add('hidden');
+            imageDisplay.removeAttribute('src'); // Prevent old image flashing
+            jsonDisplay.classList.add('hidden');
+            jsonTitle.classList.add('hidden');
+            currentFileTitle.textContent = 'Loading...';
+        }
+        
         async function loadContent(filePair, listItemElement) {
-            // Highlight active item
+            clearPreviousContent();
+
             document.querySelectorAll('#navigation-ul li').forEach(li => li.classList.remove('active'));
             if(listItemElement) listItemElement.classList.add('active');
+            currentFileTitle.textContent = `Loading ${filePair.name}...`;
 
-            currentFileTitle.textContent = filePair.name;
+            // Load image and then process JSON and draw overlays
+            imageDisplay.onload = () => {
+                imageDisplay.classList.remove('hidden');
+                currentFileTitle.textContent = filePair.name;
 
-            // Display image
-            imageDisplay.src = filePair.imagePath;
+                // Crucial: Set SVG dimensions to match the *rendered* image size
+                const renderedWidth = imageDisplay.offsetWidth;
+                const renderedHeight = imageDisplay.offsetHeight;
+                svgOverlay.setAttribute('viewBox', `0 0 ${renderedWidth} ${renderedHeight}`);
+                svgOverlay.style.width = renderedWidth + 'px';
+                svgOverlay.style.height = renderedHeight + 'px';
+                
+                fetchAndDrawRekognitionData(filePair, renderedWidth, renderedHeight);
+            };
+            imageDisplay.onerror = () => {
+                console.error("Error loading image:", filePair.imagePath);
+                currentFileTitle.textContent = `Error loading: ${filePair.name}`;
+                // Optionally show a placeholder or error message for the image
+            };
+            imageDisplay.src = filePair.imagePath + '?cachebust=' + new Date().getTime();
             imageDisplay.alt = `Image: ${filePair.name}`;
-            imageDisplay.classList.remove('hidden');
+        }
 
-            // Fetch and display JSON (if path exists)
+        async function fetchAndDrawRekognitionData(filePair, imgRenderedWidth, imgRenderedHeight) {
             if (filePair.jsonPath) {
                 try {
-                    const response = await fetch(filePair.jsonPath + '?cachebust=' + new Date().getTime()); // Cache busting
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
+                    const response = await fetch(filePair.jsonPath + '?cachebust=' + new Date().getTime());
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                     const jsonData = await response.json();
-                    jsonDisplay.textContent = JSON.stringify(jsonData, null, 2); // Pretty print
+                    
+                    jsonDisplay.textContent = JSON.stringify(jsonData, null, 2);
                     jsonDisplay.classList.remove('hidden');
                     jsonTitle.classList.remove('hidden');
+
+                    drawRekognitionVisualizations(jsonData, imgRenderedWidth, imgRenderedHeight);
                 } catch (error) {
                     console.error(`Could not load JSON file "${filePair.jsonPath}":`, error);
                     jsonDisplay.textContent = `Error loading JSON for ${filePair.name}:\n${error.message}`;
@@ -108,6 +161,133 @@
                 jsonDisplay.classList.remove('hidden');
                 jsonTitle.classList.remove('hidden');
             }
+        }
+
+        function drawRekognitionVisualizations(data, imgWidth, imgHeight) {
+            svgOverlay.innerHTML = ''; // Clear previous drawings just in case
+
+            // --- DetectLabels ---
+            if (data.Labels) {
+                data.Labels.forEach(label => {
+                    if (label.Instances) {
+                        label.Instances.forEach(instance => {
+                            if (instance.BoundingBox) {
+                                drawBoundingBox(svgOverlay, instance.BoundingBox, label.Name, instance.Confidence, 'rgba(0, 150, 255, 0.8)', imgWidth, imgHeight);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // --- DetectFaces ---
+            if (data.FaceDetails) {
+                data.FaceDetails.forEach(face => {
+                    if (face.BoundingBox) {
+                        let labelText = "Face";
+                        // You could add more details like age range, gender if available
+                        drawBoundingBox(svgOverlay, face.BoundingBox, labelText, face.Confidence, 'rgba(255, 0, 0, 0.8)', imgWidth, imgHeight);
+                        
+                        // Example: Draw Landmarks if they exist
+                        if (face.Landmarks) {
+                            face.Landmarks.forEach(landmark => {
+                                drawCircle(svgOverlay, landmark.X, landmark.Y, 'red', imgWidth, imgHeight);
+                            });
+                        }
+                    }
+                });
+            }
+
+            // --- DetectText (TextDetections) ---
+            if (data.TextDetections) {
+                data.TextDetections.forEach(text => {
+                    if (text.Geometry && text.Geometry.Polygon && (text.Type === "LINE" || text.Type === "WORD")) {
+                         drawPolygon(svgOverlay, text.Geometry.Polygon, text.DetectedText, text.Confidence, text.Type === "LINE" ? 'rgba(0,200,0,0.7)' : 'rgba(50,200,50,0.5)', imgWidth, imgHeight);
+                    }
+                });
+            }
+            
+            // --- DetectModerationLabels ---
+            if (data.ModerationLabels) {
+                 data.ModerationLabels.forEach(label => {
+                    if (label.ParentName) { // Often ParentName is more useful or present
+                         drawBoundingBox(svgOverlay, label.BoundingBox, `${label.ParentName} - ${label.Name}`, label.Confidence, 'rgba(255,100,0,0.8)', imgWidth, imgHeight);
+                    } else if (label.BoundingBox) {
+                         drawBoundingBox(svgOverlay, label.BoundingBox, label.Name, label.Confidence, 'rgba(255,100,0,0.8)', imgWidth, imgHeight);
+                    }
+                });
+            }
+        }
+
+        function drawBoundingBox(svg, bbox, label, confidence, color, imgWidth, imgHeight) {
+            if (!bbox || !imgWidth || !imgHeight) return;
+
+            const x = bbox.Left * imgWidth;
+            const y = bbox.Top * imgHeight;
+            const w = bbox.Width * imgWidth;
+            const h = bbox.Height * imgHeight;
+
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', w);
+            rect.setAttribute('height', h);
+            rect.setAttribute('stroke', color);
+            rect.setAttribute('stroke-width', '2');
+            rect.setAttribute('fill', 'none');
+            svg.appendChild(rect);
+
+            const textLabel = `${label} (${parseFloat(confidence).toFixed(1)}%)`;
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x + 3);
+            text.setAttribute('y', y > 15 ? y - 5 : y + 15); // Position above or below based on space
+            text.setAttribute('fill', 'white');
+            text.setAttribute('font-size', '12px');
+            text.setAttribute('font-family', 'sans-serif');
+            text.setAttribute('paint-order', 'stroke');
+            text.setAttribute('stroke', 'black'); // Simple text outline for readability
+            text.setAttribute('stroke-width', '0.5px');
+            text.textContent = textLabel;
+            svg.appendChild(text);
+        }
+        
+        function drawPolygon(svg, polygonPoints, label, confidence, color, imgWidth, imgHeight) {
+            if (!polygonPoints || !imgWidth || !imgHeight) return;
+
+            const points = polygonPoints.map(p => `${p.X * imgWidth},${p.Y * imgHeight}`).join(' ');
+
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            polygon.setAttribute('points', points);
+            polygon.setAttribute('stroke', color);
+            polygon.setAttribute('stroke-width', '2');
+            polygon.setAttribute('fill', 'rgba(255,255,255,0.1)'); // Slight fill
+            svg.appendChild(polygon);
+
+            const textLabel = `${label} (${parseFloat(confidence).toFixed(1)}%)`;
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            // Position text near the first point of the polygon
+            text.setAttribute('x', polygonPoints[0].X * imgWidth);
+            text.setAttribute('y', polygonPoints[0].Y * imgHeight - 5);
+            text.setAttribute('fill', 'white');
+            text.setAttribute('font-size', '12px');
+            text.setAttribute('font-family', 'sans-serif');
+            text.setAttribute('paint-order', 'stroke');
+            text.setAttribute('stroke', 'black');
+            text.setAttribute('stroke-width', '0.5px');
+            text.textContent = textLabel;
+            svg.appendChild(text);
+        }
+
+        function drawCircle(svg, relX, relY, color, imgWidth, imgHeight, radius = 3) {
+            if (relX === undefined || relY === undefined || !imgWidth || !imgHeight) return;
+            const cx = relX * imgWidth;
+            const cy = relY * imgHeight;
+
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', cx);
+            circle.setAttribute('cy', cy);
+            circle.setAttribute('r', radius);
+            circle.setAttribute('fill', color);
+            svg.appendChild(circle);
         }
 
         document.addEventListener('DOMContentLoaded', loadManifestAndDisplayFiles);
