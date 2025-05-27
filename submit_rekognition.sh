@@ -10,13 +10,13 @@ OUTPUT_JSON_DIR=rekognition_response_json
 
 mkdir -p "$OUTPUT_JSON_DIR"
 
-for json_file in ./rekognition_json_payloads/*.json; do
-    if [ -f "$json_file" ]; then
-        echo "submitting $json_file to Rekognition detect-labels via $AWS_SSO_PROFILE_NAME..."
-        # aws rekognition detect-labels \
-        #     --cli-input-json file://$json_file \
-        #     --region us-gov-west-1 \
-        #     --profile $AWS_SSO_PROFILE_NAME > "./$OUTPUT_JSON_DIR/$json_file"
+for JSON_FILE in ./rekognition_json_payloads/*.json; do
+    if [ -f "$JSON_FILE" ]; then
+        echo "submitting $JSON_FILE to Rekognition detect-labels via $AWS_SSO_PROFILE_NAME..."
+        aws rekognition detect-labels \
+            --cli-input-json file://$JSON_FILE \
+            --region $AWS_REGION \
+            --profile $AWS_SSO_PROFILE_NAME > "./$OUTPUT_JSON_DIR/${JSON_FILE##*/}"
     fi
     sleep 0.5
 done
